@@ -1,0 +1,89 @@
+---
+title: "EGRET"
+author: "Josh Erickson"
+date: "September 17, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dataRetrieval)
+library(EGRET)
+library(tidyverse)
+library(feather)
+
+```
+
+```{r}
+usgs_EGRET <- data.frame()
+
+
+siteListMT <- whatNWISsites(stateCd="MT") %>% filter(site_tp_cd == "ST", as.numeric(site_no) < 	
+                                                       100000000)
+
+siteListMT <- siteListMT %>% filter(dec_lat_va > 47, dec_long_va < -114)
+
+siteListID <- whatNWISsites(stateCd="ID") %>% filter(site_tp_cd == "ST", as.numeric(site_no) < 	
+                                                       100000000)
+
+siteListID <- siteListID %>% filter(dec_lat_va > 47)
+
+allSitesIDMT <- rbind(siteListID, siteListMT)
+
+usgs_ids <- paste0(allSitesIDMT$site_no)
+
+site_id_usgs <- usgs_ids
+
+for (i in seq_along(site_id_usgs)) {
+
+tryCatch({EGRET <- readNWISDaily(siteNumber = site_id_usgs[[i]], "00060","","")
+   
+   EGRET$station_nm <- readNWISsite(site_id_usgs[[i]]) %>% select(station_nm) %>% as.character()
+
+  usgs_EGRET <- plyr::rbind.fill(usgs_EGRET, EGRET)
+}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+
+}
+
+write_feather(usgs_EGRET, "usgs_EGRET.csv")
+```
+
+
+
+
+```{r}
+
+usgs_info <- data.frame()
+
+
+siteListMT <- whatNWISsites(stateCd="MT") %>% filter(site_tp_cd == "ST", as.numeric(site_no) < 	
+                                                       100000000)
+
+siteListMT <- siteListMT %>% filter(dec_lat_va > 47, dec_long_va < -114)
+
+siteListID <- whatNWISsites(stateCd="ID") %>% filter(site_tp_cd == "ST", as.numeric(site_no) < 	
+                                                       100000000)
+
+siteListID <- siteListID %>% filter(dec_lat_va > 47)
+
+allSitesIDMT <- rbind(siteListID, siteListMT)
+
+usgs_ids <- paste0(allSitesIDMT$site_no)
+
+site_id_usgs <- usgs_ids
+
+for (i in seq_along(site_id_usgs)) {
+
+  tryCatch({info <- readNWISInfo(site_id_usgs[[i]],"00060", interactive = FALSE)
+
+  usgs_info <- plyr::rbind.fill(usgs_info, info)
+}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+  
+}
+
+
+write_feather(usgs_info, "usgs_info.csv")
+
+```
+
+

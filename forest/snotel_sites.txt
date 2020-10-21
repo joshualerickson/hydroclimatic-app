@@ -1,0 +1,26 @@
+311	Banfield Mountain	MT	SNTL	Remove
+323	Bear Mountain	ID	SNTL	Remove
+346	Bisson Creek	MT	SNTL	Remove
+1144	Blacktail Mtn	MT	SNTL	Remove
+469	Emery Creek	MT	SNTL	Remove
+482	Flattop Mtn.	MT	SNTL	Remove
+918	Garver Creek	MT	SNTL	Remove
+500	Grave Creek	MT	SNTL	Remove
+510	Hand Creek	MT	SNTL	Remove
+516	Hawkins Lake	MT	SNTL	Remove
+988	Hidden Lake	ID	SNTL	Remove
+535	Humboldt Gulch	ID	SNTL	Remove
+594	Lookout	ID	SNTL	Remove
+600	Lost Lake	ID	SNTL	Remove
+613	Many Glacier	MT	SNTL	Remove
+623	Mica Creek	ID	SNTL	Remove
+645	Mosquito Ridge	ID	SNTL	Remove
+646	Moss Peak	MT	SNTL	Remove
+1053	Myrtle Creek	ID	SNTL	Remove
+664	Noisy Basin	MT	SNTL	Remove
+932	Poorman Creek	MT	SNTL	Remove
+1081	Ragged Mountain	ID	SNTL	Remove
+738	Schweitzer Basin	ID	SNTL	Remove
+783	Sleeping Woman	MT	SNTL	Remove
+787	Stahl Peak	MT	SNTL	Remove
+803	Sunset	ID	SNTL	Remove

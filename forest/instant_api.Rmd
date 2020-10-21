@@ -1,0 +1,40 @@
+---
+title: "api_instant"
+author: "Josh Erickson"
+date: "10/19/2020"
+output: html_document
+---
+
+```{r}
+library(snotelr)
+library(dataRetrieval)
+library(tidyverse)
+library(lubridate)
+library(googleCloudStorageR)
+```
+
+Get instantaneous values from snotel and usgs.
+
+```{r}
+
+gcs_auth("D:/Landsat_8/gcs_auth_file_shiny.json")
+
+inland_northwest_hourly <- data.frame()
+
+snotel_ids <- read_tsv("snotel_sites.txt", col_names = F)
+
+site_id <- c(snotel_ids$X1)
+
+for (i in seq_along(site_id)) {
+
+  snotel <- snotel_download_hourly(site_id = site_id[[i]], path = getwd(), internal = TRUE)
+
+  inland_northwest_hourly <- rbind(inland_northwest_hourly, snotel)
+}
+
+inland_northwest_hourly <- inland_northwest_hourly %>% mutate(date = ymd_hm(date))
+
+
+gcs_upload(inland_northwest_hourly, bucket = "joshualerickson", name = "inland_northwest_hourly")
+```
+

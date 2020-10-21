@@ -1,0 +1,362 @@
+---
+title: "updated_data_download"
+author: "Josh Erickson"
+date: "September 17, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lubridate)
+library(dataRetrieval)
+library(smwrStats)
+library(smwrBase)
+library(EGRET)
+library(snotelr)
+library(evd)
+library(purrr)
+library(broom)
+library(tidyverse)
+library(scales)
+library(feather)
+```
+
+Download the data needed on a daily basis. Starting with snotel data.
+
+# Snotel Data
+
+```{r}
+inland_northwest_snotel <- data.frame()
+
+snotel_ids <- read_tsv("snotel_sites.txt", col_names = F)
+
+site_id <- c(snotel_ids$X1)
+
+for (i in seq_along(site_id)) {
+
+  snotel <- snotel_download_custom(site_id = site_id[[i]], path = getwd(), internal = TRUE)
+
+  inland_northwest_snotel <- rbind(inland_northwest_snotel, snotel)
+}
+
+
+phenology <- inland_northwest_snotel %>% group_by(site_name) %>% 
+  nest() %>% mutate(phenology = map(data, ~snotel_phenology(.))) %>% 
+  select(site_name, phenology) %>% unnest(cols = phenology) %>% 
+  mutate(max_swe = max_swe*0.0393701,
+         first_snow_acc_d = as.Date(first_snow_acc, origin = "1970-01-01") %>%
+           str_remove(., "1970-") %>% str_c(year,., sep = "-") %>% parse_date_time(., orders = c("%y-%m-%d", "%y%m%d", "%y-%m-%d %H:%M")),
+         first_snow_melt_d = as.Date(first_snow_melt, origin = "1970-01-01") %>%
+           str_remove(., "1970-") %>% str_c(year,., sep = "-") %>% parse_date_time(., orders = c("%y-%m-%d", "%y%m%d", "%y-%m-%d %H:%M")),
+         last_snow_melt_d = as.Date(last_snow_melt, origin = "1970-01-01") %>%
+           str_remove(., "1970-") %>% str_c(year,., sep = "-") %>% parse_date_time(., orders = c("%y-%m-%d", "%y%m%d", "%y-%m-%d %H:%M")),
+         cont_snow_acc_d = as.Date(cont_snow_acc, origin = "1970-01-01") %>%
+           str_remove(., "1970-") %>% str_c(year,., sep = "-") %>% parse_date_time(., orders = c("%y-%m-%d", "%y%m%d", "%y-%m-%d %H:%M")),
+         first_snow_acc_m = as.Date(first_snow_acc, origin = "1970-01-01") %>%
+           str_remove(., "1970-"),
+         first_snow_melt_m = as.Date(first_snow_melt, origin = "1970-01-01") %>%
+           str_remove(., "1970-"),
+         last_snow_melt_m = as.Date(last_snow_melt, origin = "1970-01-01") %>%
+           str_remove(., "1970-"),
+         cont_snow_acc_m = as.Date(cont_snow_acc, origin = "1970-01-01"),
+         site_name = word(site_name,1) %>% str_to_title(),
+        site_name = factor(site_name)) %>% arrange(site_name)
+
+ inland_northwest_snotel <- inland_northwest_snotel %>%
+   mutate(snow_water_equivalent = snow_water_equivalent*0.0393701,
+          Date = parse_date_time(date, orders = c("%y-%m-%d", "%y%m%d", "%y-%m-%d %H:%M")),
+          year = year(Date), month = month(Date),
+          month_abb = factor(month.abb[month], levels = month.abb),
+         site_name = word(site_name,1) %>% str_to_title(),
+        site_name = factor(site_name))  %>% group_by(site_name, year, month_abb) %>% 
+  mutate(swe_month = mean(snow_water_equivalent, na.rm = TRUE)) %>% ungroup() %>% arrange(site_name) %>% select(-c("network", "state", "county", "site_id", "date", "month"))
+ 
+ inland_northwest_snotel_min_max_year_month <- inland_northwest_snotel %>% filter(month_abb %in% c("Dec","Jan", "Feb", "Mar", "Apr", "May")) %>% 
+  group_by(site_name, year, month_abb) %>% 
+  summarise(Maximum = round(max(snow_water_equivalent, na.rm = TRUE),2), 
+            Minimum = round(min(snow_water_equivalent, na.rm = TRUE),2),
+            Mean = round(mean(snow_water_equivalent, na.rm = TRUE),2),
+            Median = round(median(snow_water_equivalent, na.rm = TRUE),2),
+            Standard_Deviation = round(sd(snow_water_equivalent, na.rm = TRUE),2)) %>% ungroup()
+
+  inland_northwest_snotel_min_max_month <- 
+      inland_northwest_snotel %>% filter(month_abb %in% c("Dec","Jan", "Feb", "Mar", "Apr", "May"))  %>% group_by(site_name, month_abb) %>% 
+        summarise(Maximum = round(max(snow_water_equivalent, na.rm = TRUE),2), 
+                  Minimum = round(min(snow_water_equivalent, na.rm = TRUE),2),
+                  Standard_Deviation = round(sd(snow_water_equivalent, na.rm = TRUE),2),
+                  Mean = round(mean(snow_water_equivalent, na.rm = TRUE),2),
+                  Median = round(median(snow_water_equivalent, na.rm = TRUE),2))
+ 
+ 
+inland_northwest_snotel_min_max_year <-  inland_northwest_snotel %>% filter(month_abb %in% c("Dec","Jan", "Feb", "Mar", "Apr", "May")) %>%  
+  group_by(site_name,year) %>% 
+  summarise(Maximum = round(max(snow_water_equivalent, na.rm = TRUE),2), 
+            Minimum = round(min(snow_water_equivalent, na.rm = TRUE),2),
+            Mean = round(mean(snow_water_equivalent, na.rm = TRUE),2),
+            Median = round(median(snow_water_equivalent, na.rm = TRUE),2),
+            Standard_Deviation = round(sd(snow_water_equivalent, na.rm = TRUE),2)) %>% 
+  nest() %>% 
+  mutate(shapiro_max = map(data, safely(~shapiro.test(.$Maximum))),
+         tidied_max = map(transpose(shapiro_max)[['result']], tidy),
+         log_shapiro_max = map(data, safely(~shapiro.test(log(.$Maximum)))),
+         log_tided_max = map(transpose(log_shapiro_max)[['result']], tidy),
+         shapiro_mean = map(data, safely(~shapiro.test(.$Mean))),
+         tidied_mean = map(transpose(shapiro_mean)[['result']], tidy),
+         log_shapiro_mean = map(data, safely(~shapiro.test(log(.$Mean)))),
+         log_tided_mean = map(transpose(log_shapiro_mean)[['result']], tidy),
+         shapiro_min = map(data, safely(~shapiro.test(.$Minimum))),
+         tidied_min = map(transpose(shapiro_min)[['result']], tidy),
+         log_shapiro_min = map(data, safely(~shapiro.test(log(.$Minimum)))),
+         log_tided_min = map(transpose(log_shapiro_min)[['result']], tidy),
+         shapiro_med = map(data, safely(~shapiro.test(.$Median))),
+         tidied_med = map(transpose(shapiro_med)[['result']], tidy),
+         log_shapiro_med = map(data, safely(~shapiro.test(log(.$Median)))),
+         log_tided_med = map(transpose(log_shapiro_med)[['result']], tidy)) %>%
+  select(site_name, data, contains(c("tidied", "log_tided"))) %>% ungroup() %>% 
+  unnest(cols = c(-site_name, -data), names_sep = "_") %>% unnest(cols = data) %>% 
+  mutate(
+    Normality_mean = ifelse(tidied_mean_p.value > 0.05, "Normal", 
+                            ifelse(log_tided_mean_p.value > 0.05,"Lognormal","Neither Normal or Lognormal")),
+    
+    Normality_Max = ifelse(tidied_max_p.value > 0.05,"Normal", 
+                           ifelse(log_tided_max_p.value > 0.05,"Lognormal", "Neither Normal or Lognormal")),
+    
+    Normality_Med = ifelse(tidied_med_p.value > 0.05,"Normal", 
+                           ifelse(log_tided_med_p.value > 0.05,"Lognormal","Neither Normal or Lognormal"))) %>% 
+  ungroup()  %>% select(1:7, contains("Normality"))
+
+inland_northwest_snotel_site_all <- inland_northwest_snotel %>% filter(month_abb %in% c("Dec","Jan", "Feb", "Mar", "Apr", "May"))%>% group_by(site_name, year) %>% 
+        mutate(Maximum_g = round(max(snow_water_equivalent, na.rm = TRUE),2), Median_g = round(median(snow_water_equivalent, na.rm = TRUE),2),
+               Mean_g = round(mean(snow_water_equivalent,na.rm = TRUE))) %>% ungroup() %>%  group_by(site_name) %>% 
+        summarise(Maximum = round(max(snow_water_equivalent, na.rm = TRUE),2), Minimum = round(min(snow_water_equivalent, na.rm = TRUE),2),
+                  Mean_max = round(mean(Maximum_g, na.rm = TRUE),2),
+                  SD_max = round(sd(Maximum_g, na.rm = TRUE),2),
+                  Mean_med = round(mean(Median_g, na.rm = TRUE),2),
+                  SD_med = round(sd(Median_g, na.rm = TRUE),2),
+                  Mean_mean = round(mean(Mean_g, na.rm = TRUE),2),
+                  SD_mean = round(sd(Mean_g, na.rm = TRUE),2)) %>% ungroup()
+
+#write_feather(inland_northwest_snotel, "D:/R_folder/Apps/hydroclimatic_app/app_build/inland_northwest_snotel.csv")
+
+write_feather(inland_northwest_snotel_min_max_year_month, "inland_northwest_snotel_min_max_year_month.csv")
+
+
+write_feather(inland_northwest_snotel_min_max_year, "inland_northwest_snotel_min_max_year.csv")
+
+
+write_feather(inland_northwest_snotel_min_max_month, "inland_northwest_snotel_min_max_month.csv")
+
+write_feather(inland_northwest_snotel_site_all, "inland_northwest_snotel_site_all.csv")
+
+
+write_feather(phenology, "phenology.csv")
+
+mapping_snotel <- inland_northwest_snotel %>% group_by(site_name) %>% arrange(desc(Date)) %>% slice(n = 1) %>% mutate(elev = elev*3.28084, precipitation = precipitation*0.0393701, precipitation_cumulative = precipitation_cumulative*0.0393701, snow_depth = snow_depth**0.0393701)
+
+write_feather(mapping_snotel,  "mapping_snotel.csv")
+
+```
+
+# USGS Data
+
+```{r}
+
+usgs_raw <- data.frame()
+
+siteListMT <- whatNWISsites(stateCd="MT") %>% filter(site_tp_cd == "ST", as.numeric(site_no) < 	
+                                                       100000000)
+
+siteListMT <- siteListMT %>% filter(dec_lat_va > 47, dec_long_va < -114)
+
+siteListID <- whatNWISsites(stateCd="ID") %>% filter(site_tp_cd == "ST", as.numeric(site_no) < 	
+                                                       100000000)
+
+siteListID <- siteListID %>% filter(dec_lat_va > 47)
+
+allSitesIDMT <- rbind(siteListID, siteListMT)
+
+usgs_ids <- paste0(allSitesIDMT$site_no)
+
+site_id_usgs <- usgs_ids
+
+for (i in seq_along(site_id_usgs)) {
+
+  discharge <- readNWISdv(siteNumbers = site_id_usgs[[i]], parameterCd = "00060") %>% renameNWISColumns() %>% 
+    mutate(
+           drainage_area = readNWISsite(site_id_usgs[[i]]) %>% select(drain_area_va) %>% as.numeric(),
+           Station = readNWISsite(site_id_usgs[[i]]) %>% select(station_nm) %>% as.character(),
+           lat = readNWISsite(site_id_usgs[[i]]) %>% select(dec_lat_va) %>% as.numeric(),
+           long = readNWISsite(site_id_usgs[[i]]) %>% select(dec_long_va) %>% as.numeric(),
+           altitude = readNWISsite(site_id_usgs[[i]]) %>% select(alt_va) %>% as.numeric())
+
+
+  usgs_raw <- plyr::rbind.fill(usgs_raw, discharge)
+}
+
+  usgs_raw <- usgs_raw %>% mutate(year = year(Date), month = month(Date), day = day(Date),month_day = str_c(month, day, sep = "-"),
+       wy = smwrBase::waterYear(Date, TRUE), month_abb = factor(month.abb[month], levels = month.abb),
+       month_day = str_c(month, day, sep = "-"))
+
+usgs_raw <- usgs_raw %>%
+  mutate(Station = ifelse(str_detect(Station, "Tobacco"), paste("Tobacco River near Eureka, MT"), paste(Station)))
+
+usgs_raw <- usgs_raw %>% 
+  mutate(month_day = str_c(month, day, sep = "-")) %>% group_by(Station) %>% mutate(sd_logFlow = sd(log(Flow),na.rm = TRUE)) %>% ungroup() %>% 
+  group_by(Station, month_day) %>% 
+  summarise(quantiles = quantile(Flow, probs = seq(0,1,.25), na.rm = TRUE),
+            breaks =  c("zero", "tf", "fif", "sf", "hundy")) %>% 
+  pivot_wider(values_from = quantiles, names_from = breaks) %>% 
+  rename(`0%` = "zero", `25%` = "tf",`50%` = "fif", `75%` = "sf",`100%` = "hundy") %>% 
+  right_join(., usgs_raw, by = c("Station", "month_day")) %>% ungroup() %>% select(-c(8,9,12,16,17))
+
+usgs_raw <- usgs_raw %>% group_by(Station, wy, month_abb) %>% mutate(Q_month = mean(Flow, na.rm = TRUE)) %>% ungroup() %>% mutate(Station = factor(Station)) %>% arrange(desc(Station))
+
+#write_feather(usgs_raw, "D:/R_folder/Apps/hydroclimatic_app/app_build/usgs_river_data.csv")
+ names_and_such <- data.frame()
+ for (i in seq_along(site_id_usgs)) {
+
+  hello <-  readNWISsite(site_id_usgs[[i]]) %>% select(drain_area_va) %>% as.numeric() %>% as.data.frame() %>% rename(drainage_area = ".") %>% 
+     mutate(
+           Station = readNWISsite(site_id_usgs[[i]]) %>% select(station_nm) %>% as.character(),
+           lat = readNWISsite(site_id_usgs[[i]]) %>% select(dec_lat_va) %>% as.numeric(),
+           long = readNWISsite(site_id_usgs[[i]]) %>% select(dec_long_va) %>% as.numeric(),
+           altitude = readNWISsite(site_id_usgs[[i]]) %>% select(alt_va) %>% as.numeric())
+
+
+  names_and_such <- plyr::rbind.fill(names_and_such, hello)
+}
+ usgs_min_max_wy <- usgs_raw %>% left_join(names_and_such, by = "Station")  %>% group_by(Station) %>%  mutate(atmf = mean(Flow, na.rm = TRUE)) %>% ungroup() %>%                                                         group_by(Station,wy) %>% 
+                                summarise(Maximum = max(Flow, na.rm = TRUE),
+                                          Minimum = min(Flow, na.rm = TRUE),
+                                          Mean = mean(Flow, na.rm = TRUE),
+                                          Median = median(Flow, na.rm = TRUE),
+                                          Max_dnorm = log(Maximum)/log(drainage_area),
+                                          Min_dnorm = log(Minimum)/log(drainage_area),
+                                          Mean_dnorm = log(Mean)/log(drainage_area),
+                                          Med_dnorm = log(Median)/log(drainage_area),
+                                      Max_sdnorm = log(Maximum)/sd(log(Flow), na.rm = TRUE),
+                                          Min_sdnorm = log(Minimum)/sd(log(Flow), na.rm = TRUE),
+                                          Mean_sdnorm = log(Mean)/sd(log(Flow), na.rm = TRUE),
+                                          Med_sdnorm = log(Median)/sd(log(Flow), na.rm = TRUE),
+                                      Max_avg = log(Maximum)/log(atmf),
+                                          Min_avg = log(Minimum)/log(atmf),
+                                          Mean_avg = log(Mean)/log(atmf),
+                                          Med_avg = log(Median)/log(atmf),
+                              Scale = scale(Flow),
+             log_drainage = log(drainage_area),
+             Drainage_area = drainage_area,
+             drainage_area_cut = cut(drainage_area, breaks =  c(0,50, 150, 400, 600, 800, 1000, 2000, 5000, Inf), dig.lab = 10),
+             drainage_area_cut = str_remove_all(drainage_area_cut, c("\\[|\\]" = "", "\\(|\\)" = "", "," = "-")),
+             drainage_area_cut = factor(drainage_area_cut, levels = c("0-50","50-150", "150-400", "400-600", "600-800", "800-1000", "1000-2000", "2000-5000", "5000-Inf"))) %>% slice_head(n=1) %>% ungroup()
+ 
+
+  usgs_raw_min_max_wy_month <- usgs_raw %>% 
+  group_by(Station, wy, month_abb) %>% 
+  summarise(Maximum = round(max(Flow, na.rm = TRUE),2), 
+            Minimum = round(min(Flow, na.rm = TRUE),2),
+            Mean = round(mean(Flow, na.rm = TRUE),2),
+            Median = round(median(Flow, na.rm = TRUE),2),
+            Standard_Deviation = round(sd(Flow, na.rm = TRUE),2)) %>% ungroup()
+
+  usgs_raw_min_max_month <- 
+      usgs_raw  %>% group_by(Station, month_abb) %>% 
+        summarise(Maximum = round(max(Flow, na.rm = TRUE),2), 
+                  Minimum = round(min(Flow, na.rm = TRUE),2),
+                  Standard_Deviation = round(sd(Flow, na.rm = TRUE),2),
+                  Mean = round(mean(Flow, na.rm = TRUE),2),
+                  Median = round(median(Flow, na.rm = TRUE),2))
+ 
+
+ write_feather(usgs_min_max_wy, "usgs_min_max_wy.csv")
+ 
+ usgs_raw <-  usgs_raw %>% left_join(names_and_such, by = "Station")
+mapping_usgs <- usgs_raw %>% group_by(Station) %>% arrange(desc(Date)) %>% slice(n = 1) %>%  mutate(across(contains("%"), round, 0), across(contains("%"), as.integer),
+        across(contains("%"), comma, 1), month_day = ifelse(Date < "2020-01-01", paste("historic readings"), month_day)) %>% rename(long = "long.x", altitude = "altitude.x")
+
+write_feather(mapping_usgs, "mapping_usgs.csv" )
+
+ write_feather(usgs_raw_min_max_wy_month, "usgs_min_max_wy_month.csv")
+ 
+  write_feather(usgs_raw_min_max_month, "usgs_min_max_month.csv")
+```
+
+#flood frequency
+
+```{r}
+
+
+flood_frequency <- function(data,x, y){
+  max.x <- tibble(x,y) 
+  
+  if (!nrow(max.x) >= 9) {stop("Warning: Need more data (e.g. 9 years).")}
+  mean.x <- mean(max.x$x, na.rm = TRUE) #mean of max Q
+  
+  sd.x <- sd(max.x$x, na.rm = TRUE) #standard deviation of max Q
+  
+  log_mean.x <- mean(log(max.x$x), na.rm = TRUE) #log mean of max Q
+  
+  log_sd.x <- sd(log(max.x$x), na.rm = TRUE) #log of of sd of max Q
+  
+  gum_scale.x <- sd(max.x$x, na.rm = TRUE)/1.2825 #scale for gumbel
+  
+  gum_loc.x <- mean(max.x$x, na.rm = TRUE) - sd(max.x$x, na.rm = TRUE)*0.4501 #loc for gumbel
+  
+  skewness <- psych::skew(log(max.x$x),type = 3, na.rm = TRUE) #finds the skewness of distribution
+  
+  ReturnInterval <- c(1.0101,2,5,10,15,25,30,35,40,45,50,60,70,80,90,100,150,200)
+  
+  lp.df <- smwrBase::qlpearsonIII(c(0.0099,0.5,0.8,0.90,0.9333333,0.96, 0.9666667,0.9714286,0.975,0.9777778,
+                                   0.98,0.9833333,0.9857143,0.9875,0.9888889,0.99,0.9933333,0.995), mean = log_mean.x, sd = log_sd.x,  skew = skewness)
+  
+  
+  Flood.Freq <- data.frame(ReturnInterval) 
+  
+  #normal <- qnorm(1-(1/ReturnInterval),mean = mean.x, sd = sd.x, lower.tail = TRUE)
+  
+  lognormal <- qnorm(1-(1/ReturnInterval),mean = log_mean.x, sd = log_sd.x)
+  
+  Gumbel <- qgumbel(1-(1/ReturnInterval), scale = gum_scale.x, loc = gum_loc.x)
+  
+  Flood.Freq <- Flood.Freq %>% mutate(LogPearson = lp.df, 
+                                      Lognormal = exp(lognormal), Gumbel = Gumbel) 
+  
+  Flood.Freq <- Flood.Freq %>% pivot_longer(cols = c("Lognormal", "Gumbel", "LogPearson"), values_to = "Flow", names_to = "Distribution")
+  
+  return(as.data.frame(Flood.Freq))
+}
+
+
+flood_freq <- usgs_min_max_wy  %>% group_by(Station) %>%  nest() %>% mutate(freq = map(data, safely(~flood_frequency(.,.$Maximum,.$wy)))) %>% select(Station, freq) %>% unnest() %>% slice_head(n = 1) %>% unnest() %>% ungroup()
+
+flood_freq <- flood_freq %>% left_join(usgs_min_max_wy, by = "Station") %>% 
+  group_by(Station, ReturnInterval, Distribution) %>% slice(n = 1) %>% select(1:4, "drainage_area_cut") %>% ungroup() %>% mutate(Flow = round(Flow, 0))
+
+
+
+
+flood_freq_norm <- usgs_min_max_wy %>% mutate(norm_max = log(Maximum)/log_drainage) %>% 
+        group_by(Station) %>% nest()  %>% mutate(freq = map(data, safely(~flood_frequency(.,.$norm_max,.$wy)))) %>% select(Station, freq) %>% unnest(cols = "freq") %>% slice_head(n = 1) %>% unnest(cols = "freq") %>% ungroup()
+
+flood_freq_norm <- flood_freq_norm %>% left_join(usgs_min_max_wy, by = "Station") %>% 
+  group_by(Station, ReturnInterval, Distribution) %>% slice(n = 1) %>% select(1:4, "drainage_area_cut") %>% ungroup() %>% mutate(Flow = round(Flow,3))
+
+```
+
+```{r}
+usgs_flow_stats_id_final <- read_feather("D:/R_folder/Apps/hydroclimatic_app/app_build/usgs_flow_stats_id_final.csv")
+
+usgs_flow_stats_MT <- read_feather("D:/R_folder/Apps/hydroclimatic_app/app_build/usgs_flow_stats_MT.csv")
+
+
+usgs_flow_stats_id <- read_csv("D:/R_folder/Apps/hydroclimatic_app/app_build/usgs_flow_stats_id.csv")
+
+usgs_flow_stats_pivot <- usgs_flow_stats %>% select(Station, code, value) %>% pivot_wider(names_from = c("code"))
+
+flood_freq <- flood_freq %>% left_join(usgs_flow_stats_pivot, by = "Station")
+flood_freq_norm <- flood_freq_norm %>% left_join(usgs_flow_stats_pivot, by = "Station")
+
+write_feather(flood_freq, "flood_freq.csv")
+
+write_feather(flood_freq_norm, "flood_freq_norm.csv")
+```
+
