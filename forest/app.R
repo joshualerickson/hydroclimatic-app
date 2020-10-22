@@ -4,6 +4,7 @@ library(shinydashboard)
 library(shinyWidgets)
 library(leaflet)
 library(leafpop)
+library(leafem)
 library(EGRET)
 library(splines)
 library(DT)
@@ -13,6 +14,8 @@ library(latex2exp)
 library(tidyverse)
 library(feather)
 library(ggrepel)
+library(googleCloudStorageR)
+library(Hmisc)
 
 gcs_auth("gcs_auth_file_shiny.json")
 ##### Data Prepping #####
@@ -30,6 +33,10 @@ inland_northwest_snotel_site_all <- read_feather("inland_northwest_snotel_site_a
 phenology <- read_feather("phenology.csv")
 
 mapping_snotel <- gcs_get_object("inland_northwest_hourly.csv", bucket = "joshualerickson")
+
+mapping_snotel <- mapping_snotel %>% group_by(site_name) %>% mutate(snow_depth = impute(snow_depth))  %>% ungroup()
+
+mapping_snotel_today <- mapping_snotel %>% group_by(site_name) %>% arrange(desc(date)) %>% slice(n = 1) %>% ungroup()
 
 ##### USGS Data #####
 
@@ -129,7 +136,8 @@ body = dashboardBody(
       fluidRow(
         tabBox(width = 12, id = "tabchart",
                tabPanel("Map", style = "height:92vh;",
-                        leafletOutput("swe_maps", width = "100%", height = "100%") ),
+                        column(7,leafletOutput("swe_maps")), 
+                               column(5,plotOutput("swe_ggplot"))),
                tabPanel("Month", plotOutput("swe_month"),
                         pickerInput("Site", "Please select a site:", 
                                     choices = paste0(unique(inland_northwest_snotel_min_max_year_month$site_name)),
@@ -280,20 +288,32 @@ server <- function(input, output, session) {
   
   output$swe_maps <- renderLeaflet({
     
-    labs <- as.list(mapping_snotel$site_name)
+    labs <- as.list(str_to_title(mapping_snotel_today$site_name))
     
-    leaflet("Map", data = mapping_snotel) %>% 
+    leaflet("Map", data = mapping_snotel_today) %>% 
       addTiles(group = "OpenStreetMap") %>% addMouseCoordinates(epsg = "EPSG:4326", proj4string = "+proj=utm +zone=32 +ellps=WGS84 +datum=WGS84 +units=m +no_defs") %>% 
-      addCircles(lng = mapping_snotel$longitude, lat = mapping_snotel$latitude,weight = 10,
+      addCircles(lng = mapping_snotel_today$longitude, lat = mapping_snotel_today$latitude,weight = 10,
                  fillOpacity = 0.9, popup = paste0("<p style=line-height:30px;margin:0px;>",
-                                                   "<b>Site Name: </b>",mapping_snotel$site_name,
-                                                   "<br>", "<b>Site Description: </b>", mapping_snotel$description,
-                                                   "<br>", "<b>Current Reading (SWE): </b>", round(mapping_snotel$snow_water_equivalent,2), " in",
-                                                   "<br>", "<b>Current Reading (PRECIP): </b>", round(mapping_snotel$precipitation,2), " in",
-                                                   "<br>", "<b>Current Reading (PRECIP_CUM): </b>", round(mapping_snotel$precipitation_cumulative,2), " in",
-                                                   "<br>", "<b>Elevation: </b>", comma(mapping_snotel$elev,1), " ft",
-                                                   "<br>", "<b>Observation Range: </b>", paste(mapping_snotel$start, " to ", mapping_snotel$end),"</p>"),
-                 label = lapply(labs, HTML), group = "Point_swe") 
+                                                   "<b>Site Name: </b>",str_to_title(mapping_snotel_today$site_name),
+                                                   "<br>", "<b>Site Description: </b>", mapping_snotel_today$description,
+                                                   "<br>", "<b>Site #: </b>", mapping_snotel_today$site_id,
+                                                   "<br>", "<b>Current Reading (SWE): </b>", round(mapping_snotel_today$snow_water_equivalent,2), " in",
+                                                   "<br>", "<b>Current Reading (Snow Depth): </b>", round(mapping_snotel_today$snow_depth,2), " in",
+                                                   "<br>", "<b>Current Reading (Precip. Cumulative): </b>", round(mapping_snotel_today$precipitation_cumulative,2), " in",
+                                                   "<br>", "<b>Elevation: </b>", comma(mapping_snotel_today$elev*3.28084,1), " ft",
+                                                   "<br>", "<b>Observation Range: </b>", paste(mapping_snotel_today$start, " to ", mapping_snotel_today$end),"</p>"),
+                 label = lapply(labs, HTML),layerId = ~unique(str_to_title(mapping_snotel_today$site_name)))
+    
+  })
+  
+  swe_ggplot_data <- reactive({
+    site <- input$swe_maps_shape_click$id
+    mapping_snotel %>% filter(str_to_title(site_name) %in% site)
+  })
+  
+  output$swe_ggplot <- renderPlot({
+    ggplot(data = swe_ggplot_data(), aes(date, snow_depth)) + geom_line() + geom_smooth(se = F) + theme_light() + 
+      labs(title = paste("Last 7 days of hourly Snow Depth: ", input$swe_maps_shape_click$id ), x = "Date", y = "Snow Depth (in)")
     
   })
   # ** 1.1 -- Months ----
@@ -526,7 +546,7 @@ server <- function(input, output, session) {
       mutate(table = map(data, ~kable(.) %>% kable_styling(.,bootstrap_options = c("striped", "hover", "condensed", "responsive")))) %>% pull(table)
     
     leaflet("Map", data = mapping_usgs) %>%
-      addTiles(group = "OpenStreetMap") %>%
+      addTiles(group = "OpenStreetMap") %>% addMouseCoordinates(epsg = "EPSG:4326", proj4string = "+proj=utm +zone=32 +ellps=WGS84 +datum=WGS84 +units=m +no_defs") %>% 
       addCircles(lng = mapping_usgs$long, lat = mapping_usgs$lat, weight = 10,
                  fillOpacity = 0.9, popup = paste0(
                    "<p style=line-height:30px;margin:0px;>","<b>Station: </b>",mapping_usgs$Station,

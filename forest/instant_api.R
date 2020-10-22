@@ -6,7 +6,7 @@ library(googleCloudStorageR)
 
 GCS_DEFAULT_BUCKET="joshualerickson"
 
-gcs_auth("gcs_auth_file_shiny.json")
+gcs_auth("D:/R_folder/Apps/hca_final/hydroclimatic-app/forest/gcs_auth_file_shiny.json")
 
 snotel_metric_hourly <- function(df) {
   
@@ -166,7 +166,7 @@ snotel_download_hourly <- function(
 }
 inland_northwest_hourly <- data.frame()
 
-snotel_ids <- read_tsv("D:/R_folder/Apps/hca_final/forest/snotel_sites.txt", col_names = F)
+snotel_ids <- read_tsv("D:/R_folder/Apps/hca_final/hydroclimatic-app/forest/snotel_sites.txt", col_names = F)
 
 site_id <- c(snotel_ids$X1)
 
