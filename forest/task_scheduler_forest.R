@@ -2,7 +2,7 @@ library(taskscheduleR)
 myscript <- "D:/R_folder/Apps/API folder/api_district.R"
 
 taskscheduler_create(taskname = "myfancyscript_2hr", rscript = myscript,
-                     startdate = "10/22/2020", starttime = "13:12",
+                     startdate = "11/08/2020", starttime = "11:09",
                      schedule = "HOURLY", modifier = 2)
 
 taskscheduler_delete("myfancyscript_2hr")
